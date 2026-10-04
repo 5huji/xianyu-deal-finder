@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         闲鱼好价分析助手
 // @namespace    https://github.com/5huji/xianyu-deal-finder
-// @version      1.3.0
+// @version      1.4.0
 // @description  在闲鱼搜索页一键分析：过滤求购、单只补配、钓鱼价等无效商品，输出最低价 Top10 与性价比推荐
 // @author       5huji
 // @match        https://www.goofish.com/search*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 /*
- * 闲鱼好价分析助手 v1.3.0
+ * 闲鱼好价分析助手 v1.4.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -224,7 +224,149 @@
     }
     const cheapest = use.slice().sort((a, b) => a.price - b.price).slice(0, 10);
     const best = use.slice().sort((a, b) => b._score - a._score).slice(0, 5);
-    return { total: items.length, valid: use.length, median: median, filters: stats, cheapest: cheapest, best: best };
+    return { total: items.length, valid: use.length, median: median, filters: stats, cheapest: cheapest, best: best, all: use };
+  }
+
+  /* ================= 6. 价格分析（分布 + 趋势） ================= */
+  function percentile(sorted, p) {
+    if (!sorted.length) return 0;
+    const i = (sorted.length - 1) * p;
+    const lo = Math.floor(i), hi = Math.ceil(i);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+  }
+
+  function priceStats(items) {
+    const prices = items.map((v) => v.price).filter((p) => p > 0).sort((a, b) => a - b);
+    if (!prices.length) return null;
+    return {
+      n: prices.length,
+      min: prices[0],
+      max: prices[prices.length - 1],
+      p25: percentile(prices, 0.25),
+      median: percentile(prices, 0.50),
+      p75: percentile(prices, 0.75),
+      prices: prices,
+    };
+  }
+
+  // ---- 快照存 localStorage：同一关键词多次分析 → 趋势线 ----
+  const HIST_KEY = 'xydeal_hist_v1';
+  function loadHist() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveHist(h) {
+    try {
+      const keys = Object.keys(h);
+      if (keys.length > 60) {
+        keys.sort((a, b) => {
+          const ta = (h[a].length && h[a][h[a].length - 1].t) || 0;
+          const tb = (h[b].length && h[b][h[b].length - 1].t) || 0;
+          return ta - tb;
+        });
+        keys.slice(0, keys.length - 60).forEach((k) => { delete h[k]; });
+      }
+      localStorage.setItem(HIST_KEY, JSON.stringify(h));
+    } catch (e) {}
+  }
+  function normKeyword(k) { return (k || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+  function dateStr(t) { const d = new Date(t); return (d.getMonth() + 1) + '月' + d.getDate() + '日'; }
+  // 返回上一次快照（用于涨跌对比），无则返回 null
+  function pushSnapshot(keyword, st) {
+    const k = normKeyword(keyword);
+    if (!k || !st) return null;
+    const h = loadHist();
+    const arr = h[k] || [];
+    const prev = arr.length ? arr[arr.length - 1] : null;
+    arr.push({ t: Date.now(), median: Math.round(st.median), p25: Math.round(st.p25),
+               p75: Math.round(st.p75), min: Math.round(st.min), n: st.n });
+    h[k] = arr.slice(-30);
+    saveHist(h);
+    return prev;
+  }
+
+  // ---- SVG 图表（无依赖，手写） ----
+  function svgHist(st) {
+    const W = 420, H = 150, padL = 36, padB = 22, padT = 10;
+    const min = st.min, span = Math.max(st.max - min, 1);
+    const NB = 12, buckets = new Array(NB).fill(0);
+    st.prices.forEach((p) => {
+      let b = Math.floor((p - min) / span * NB);
+      if (b >= NB) b = NB - 1; if (b < 0) b = 0;
+      buckets[b]++;
+    });
+    const bmax = Math.max.apply(null, buckets.concat([1]));
+    const iw = W - padL - 8, ih = H - padT - padB;
+    const X = (p) => padL + (p - min) / span * iw;
+    const bw = iw / NB;
+    let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;display:block" xmlns="http://www.w3.org/2000/svg">';
+    s += '<rect x="' + X(st.p25).toFixed(1) + '" y="' + padT + '" width="' + Math.max(X(st.p75) - X(st.p25), 2).toFixed(1) +
+         '" height="' + ih + '" fill="#dcfce7"/>';
+    buckets.forEach((c, i) => {
+      const bh = c / bmax * ih;
+      if (bh <= 0) return;
+      s += '<rect x="' + (padL + i * bw + 1).toFixed(1) + '" y="' + (padT + ih - bh).toFixed(1) +
+           '" width="' + Math.max(bw - 2, 1).toFixed(1) + '" height="' + bh.toFixed(1) + '" rx="2" fill="#fdba74"/>';
+    });
+    s += '<line x1="' + X(st.median).toFixed(1) + '" y1="' + padT + '" x2="' + X(st.median).toFixed(1) +
+         '" y2="' + (padT + ih) + '" stroke="#16a34a" stroke-width="2"/>';
+    const yb = padT + ih + 14;
+    s += '<text x="' + X(st.median).toFixed(1) + '" y="' + yb + '" font-size="10" text-anchor="middle" fill="#16a34a">中位¥' + fmtPrice(st.median) + '</text>';
+    s += '<text x="' + padL + '" y="' + yb + '" font-size="10" fill="#999">¥' + fmtPrice(min) + '</text>';
+    s += '<text x="' + (W - 8) + '" y="' + yb + '" font-size="10" text-anchor="end" fill="#999">¥' + fmtPrice(st.max) + '</text>';
+    return s + '</svg>';
+  }
+
+  function svgTrend(arr) {
+    const data = arr.slice(-12);
+    const W = 420, H = 150, padL = 36, padB = 22, padT = 10;
+    const all = [];
+    data.forEach((d) => { all.push(d.p25, d.p75, d.median); });
+    let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+    const pad = Math.max((hi - lo) * 0.15, 1);
+    lo -= pad; hi += pad;
+    const iw = W - padL - 8, ih = H - padT - padB;
+    const X = (i) => padL + (data.length === 1 ? iw / 2 : i / (data.length - 1) * iw);
+    const Y = (p) => padT + ih - (p - lo) / (hi - lo) * ih;
+    const dt = (t) => { const d = new Date(t); return (d.getMonth() + 1) + '/' + d.getDate(); };
+    let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;display:block" xmlns="http://www.w3.org/2000/svg">';
+    let band = '';
+    data.forEach((d, i) => { band += (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(d.p75).toFixed(1) + ' '; });
+    for (let i = data.length - 1; i >= 0; i--) band += 'L' + X(i).toFixed(1) + ',' + Y(data[i].p25).toFixed(1) + ' ';
+    s += '<path d="' + band + 'Z" fill="#dcfce7"/>';
+    let line = '';
+    data.forEach((d, i) => { line += (i ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(d.median).toFixed(1) + ' '; });
+    s += '<path d="' + line + '" fill="none" stroke="#16a34a" stroke-width="2"/>';
+    data.forEach((d, i) => {
+      s += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(d.median).toFixed(1) + '" r="3" fill="#16a34a"/>';
+    });
+    const yb = padT + ih + 14;
+    s += '<text x="' + padL + '" y="' + yb + '" font-size="10" fill="#999">' + dt(data[0].t) + '</text>';
+    s += '<text x="' + (W - 8) + '" y="' + yb + '" font-size="10" text-anchor="end" fill="#999">' + dt(data[data.length - 1].t) + '</text>';
+    s += '<text x="' + (W - 8) + '" y="' + (padT + 10) + '" font-size="10" text-anchor="end" fill="#16a34a">中位 ¥' + data[data.length - 1].median + '</text>';
+    return s + '</svg>';
+  }
+
+  function trendSection(r, keyword, skipSnapshot) {
+    const pst = priceStats(r.all || []);
+    if (!pst) return '';
+    const prev = skipSnapshot ? null : pushSnapshot(keyword, pst);
+    let note = '';
+    if (prev && prev.median > 0) {
+      const chg = (pst.median - prev.median) / prev.median * 100;
+      if (chg <= -5) note = '<div class="xy-trust">📉 中位价比上次（' + dateStr(prev.t) + '）降了 ' + Math.abs(chg).toFixed(1) + '%</div>';
+      else if (chg >= 5) note = '<div class="xy-reason">📈 中位价比上次（' + dateStr(prev.t) + '）涨了 ' + chg.toFixed(1) + '%</div>';
+    }
+    const h = (loadHist()[normKeyword(keyword)] || []);
+    let htm = '<div class="xy-sec"><h4>📊 价格分布 · 合理区间 ¥' + fmtPrice(pst.p25) + ' – ¥' + fmtPrice(pst.p75) + '</h4>' +
+      '<div class="xy-reason">绿色区域为中间 50% 的成交价，绿色竖线为中位价；低于左边缘很多的要警惕，高于右边缘很多的不划算</div>' +
+      svgHist(pst) + note;
+    if (h.length >= 2) {
+      htm += '<h4 style="margin-top:10px">📈 中位价走势（近 ' + h.length + ' 次分析）</h4>' +
+             '<div class="xy-reason">色带为合理区间（P25–P75），绿线为中位价</div>' + svgTrend(h);
+    } else {
+      htm += '<div class="xy-reason">💡 同一关键词多分析几次，这里会长出价格走势线，帮你判断现在是不是入手时机</div>';
+    }
+    return htm + '</div>';
   }
 
   /* ================= 4. 界面 ================= */
@@ -336,7 +478,7 @@
   }
 
   let lastResult = null, lastKeyword = '', verifyDone = false;
-  function renderResult(r, keyword) {
+  function renderResult(r, keyword, skipSnapshot) {
     lastResult = r; lastKeyword = keyword;
     const box = panelEl.querySelector('#xy-deal-result');
     if (!r.valid) {
@@ -348,6 +490,7 @@
       r.total + ' 条 · 有效 <b>' + r.valid + '</b> 条 · 中位价 <b>¥' + fmtPrice(r.median) + '</b><br>' +
       '已过滤：求购/补配 ' + r.filters.blocked + ' · 无关 ' + r.filters.irrelevant +
       ' · 疑似钓鱼价 ' + r.filters.bait + '</div></div>';
+    h += trendSection(r, keyword, skipSnapshot);
     h += '<div class="xy-sec"><button id="xy-verify-btn"' + (verifyDone ? ' disabled' : '') + '>' +
       (verifyDone ? '✅ 已核验 Top 候选' : '🛡️ 核验 Top 候选详情页（约需1分钟）') + '</button>' +
       '<div class="xy-reason" style="margin-bottom:6px">逐个打开候选商品详情，核验价格一致性、想要人数、卖家信用并标记风险。</div></div>';
@@ -486,7 +629,7 @@
     }
     verifyDone = true;
     setLog('核验完成 ✅（' + cands.length + ' 个候选，风险标记已更新到列表中）');
-    renderResult(lastResult, lastKeyword);
+    renderResult(lastResult, lastKeyword, true); // 重绘，不重复存快照
     verifying = false;
   }
   async function runAnalysis() {
