@@ -1,5 +1,5 @@
 /*
- * 闲鱼好价分析助手 v1.1.1
+ * 闲鱼好价分析助手 v1.2.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -71,14 +71,25 @@
   hookNetwork();
 
   /* ================= 2. DOM 兜底抓取 ================= */
+  // 找到商品链接所属的最小单品卡片：往上爬，直到祖先里恰好只包含这一个商品链接
+  function cardOf(a) {
+    let node = a, card = a;
+    while (node.parentElement && node.parentElement !== document.body) {
+      node = node.parentElement;
+      let n = 0;
+      try { n = node.querySelectorAll('a[href*="/item?id="]').length; } catch (e) { break; }
+      if (n === 1) { card = node; } else { break; }
+    }
+    return card;
+  }
+
   function collectDomItems() {
     const out = new Map();
     document.querySelectorAll('a[href*="/item?id="]').forEach((a) => {
       const m = a.href.match(/id=(\d+)/);
       if (!m) return;
       const id = m[1];
-      let el = a;
-      for (let i = 0; i < 5 && el.parentElement; i++) el = el.parentElement;
+      const el = cardOf(a);
       const text = (el.innerText || '').replace(/\n{2,}/g, '\n');
       const pm = text.match(/¥\s*([\d,]+(?:\.\d+)?)/);
       if (!pm) return;
@@ -304,6 +315,31 @@
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+  // 单次收集：DOM + 已拦截到的接口数据，返回新增条数
+  function collectOnce(seen) {
+    let added = 0;
+    collectDomItems().forEach((v, k) => { if (!seen.has(k)) { seen.add(k); added++; } });
+    apiItems.forEach((v, k) => { if (!seen.has(k)) { seen.add(k); added++; } });
+    return added;
+  }
+
+  // 找分页器的"下一页"按钮（桌面版式）。找不到返回 null。
+  function findNextPage() {
+    const els = document.querySelectorAll('a,button');
+    for (const el of els) {
+      if (!el.offsetParent) continue; // 不可见
+      const t = (el.textContent || '').trim();
+      if (t !== '下一页' && t !== '>') continue;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      const cls = (el.className || '').toString();
+      if (/disabl/i.test(cls)) continue;
+      const ptxt = el.parentElement ? (el.parentElement.textContent || '') : '';
+      if (!/\d\D+\d/.test(ptxt)) continue; // 父容器里至少有两个被隔开的数字才是分页器
+      return el;
+    }
+    return null;
+  }
+
   let running = false;
   async function runAnalysis() {
     if (running) return;
@@ -317,18 +353,35 @@
         return;
       }
       apiItems.clear();
-      setLog('开始抓取：自动滚动加载搜索结果…');
       const seen = new Set();
-      let noNew = 0;
-      const ROUNDS = 8;
-      for (let i = 0; i < ROUNDS; i++) {
-        window.scrollTo(0, document.body.scrollHeight);
-        await sleep(2200);
-        let added = 0;
-        collectDomItems().forEach((v, k) => { if (!seen.has(k)) { seen.add(k); added++; } });
-        apiItems.forEach((v, k) => { if (!seen.has(k)) { seen.add(k); added++; } });
-        setLog('正在加载第 ' + (i + 1) + '/' + ROUNDS + ' 页…已抓取 ' + seen.size + ' 条');
-        if (added === 0) { noNew++; if (noNew >= 2) break; } else { noNew = 0; }
+      collectOnce(seen);
+      setLog('开始抓取…已抓取 ' + seen.size + ' 条');
+
+      if (findNextPage()) {
+        // 桌面版式：点翻页，最多抓 8 页
+        setLog('检测到翻页条，正在逐页抓取…');
+        let noNew = 0;
+        for (let p = 0; p < 7; p++) {
+          const btn = findNextPage();
+          if (!btn) break;
+          btn.click();
+          await sleep(3200); // 等新一页的接口返回
+          const added = collectOnce(seen);
+          setLog('正在抓取第 ' + (p + 2) + ' 页…已抓取 ' + seen.size + ' 条');
+          if (added === 0) { noNew++; if (noNew >= 2) break; } else { noNew = 0; }
+        }
+      } else {
+        // 移动版式：自动滚动加载
+        setLog('自动滚动加载搜索结果…');
+        let noNew = 0;
+        const ROUNDS = 8;
+        for (let i = 0; i < ROUNDS; i++) {
+          window.scrollTo(0, document.body.scrollHeight);
+          await sleep(2200);
+          const added = collectOnce(seen);
+          setLog('正在加载…已抓取 ' + seen.size + ' 条');
+          if (added === 0) { noNew++; if (noNew >= 2) break; } else { noNew = 0; }
+        }
       }
       setLog('抓取完成，共 ' + seen.size + ' 条，正在分析…');
       await sleep(300);
