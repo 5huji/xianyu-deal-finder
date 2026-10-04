@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         闲鱼好价分析助手
 // @namespace    https://github.com/5huji/xianyu-deal-finder
-// @version      1.2.0
+// @version      1.3.0
 // @description  在闲鱼搜索页一键分析：过滤求购、单只补配、钓鱼价等无效商品，输出最低价 Top10 与性价比推荐
 // @author       5huji
 // @match        https://www.goofish.com/search*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 /*
- * 闲鱼好价分析助手 v1.2.0
+ * 闲鱼好价分析助手 v1.3.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -260,6 +260,13 @@
     '.xy-rank{display:inline-block;min-width:20px;height:20px;line-height:20px;text-align:center;',
     'background:#ff6a00;color:#fff;border-radius:10px;font-size:12px;margin-right:6px;padding:0 4px;}',
     '.xy-foot{padding:10px 16px;border-top:1px solid #eee;font-size:11px;color:#aaa;}',
+    '.xy-risk{font-size:12px;margin-top:4px;padding:5px 8px;border-radius:6px;line-height:1.5;}',
+    '.xy-risk.high{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;}',
+    '.xy-risk.med{background:#fffbeb;color:#b45309;border:1px solid #fde68a;}',
+    '.xy-trust{font-size:12px;margin-top:3px;color:#15803d;}',
+    '#xy-verify-btn{display:block;width:100%;margin:2px 0 10px;padding:12px;border:none;border-radius:10px;',
+    'background:#16a34a;color:#fff;font-size:14px;cursor:pointer;font-family:inherit;}',
+    '#xy-verify-btn:disabled{background:#9ca3af;cursor:default;}',
   ].join('\n');
 
   let panelEl = null, btnEl = null;
@@ -304,13 +311,33 @@
 
   function itemHTML(v, i) {
     const img = v.image ? '<img src="' + esc(v.image) + '" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+    let extra = '';
+    const vf = v._verify;
+    if (vf && !vf.error) {
+      (vf.risks || []).forEach((rk) => {
+        extra += '<div class="xy-risk ' + (rk.level === 'high' ? 'high' : 'med') + '">' +
+          (rk.level === 'high' ? '🚫 ' : '⚠️ ') + esc(rk.text) + '</div>';
+      });
+      if (vf.trust && vf.trust.length) {
+        extra += '<div class="xy-trust">✅ ' + esc(vf.trust.join(' · ')) + '</div>';
+      }
+      const bits = [];
+      if (vf.want != null) bits.push(vf.want + '人想要');
+      if (vf.credit) bits.push('芝麻信用' + vf.credit);
+      if (vf.publishAgo) bits.push(vf.publishAgo + '发布');
+      if (bits.length) extra += '<div class="xy-reason">📋 ' + esc(bits.join(' · ')) + '</div>';
+    } else if (vf && vf.error) {
+      extra += '<div class="xy-reason">（详情核验失败，请手动点进去看）</div>';
+    }
     return '<div class="xy-item"><span class="xy-rank">' + (i + 1) + '</span>' + img +
       '<div class="xy-info"><a class="xy-title" href="' + esc(v.url) + '" target="_blank" rel="noopener">' +
       esc(v.title) + '</a><div class="xy-price">¥' + fmtPrice(v.price) + '</div>' +
-      '<div class="xy-reason">' + esc(v._reasons.join('；')) + '</div></div></div>';
+      '<div class="xy-reason">' + esc(v._reasons.join('；')) + '</div>' + extra + '</div></div>';
   }
 
+  let lastResult = null, lastKeyword = '', verifyDone = false;
   function renderResult(r, keyword) {
+    lastResult = r; lastKeyword = keyword;
     const box = panelEl.querySelector('#xy-deal-result');
     if (!r.valid) {
       box.innerHTML = '<div class="xy-sec"><div class="xy-stats">共抓取 ' + r.total +
@@ -321,11 +348,16 @@
       r.total + ' 条 · 有效 <b>' + r.valid + '</b> 条 · 中位价 <b>¥' + fmtPrice(r.median) + '</b><br>' +
       '已过滤：求购/补配 ' + r.filters.blocked + ' · 无关 ' + r.filters.irrelevant +
       ' · 疑似钓鱼价 ' + r.filters.bait + '</div></div>';
+    h += '<div class="xy-sec"><button id="xy-verify-btn"' + (verifyDone ? ' disabled' : '') + '>' +
+      (verifyDone ? '✅ 已核验 Top 候选' : '🛡️ 核验 Top 候选详情页（约需1分钟）') + '</button>' +
+      '<div class="xy-reason" style="margin-bottom:6px">逐个打开候选商品详情，核验价格一致性、想要人数、卖家信用并标记风险。</div></div>';
     h += '<div class="xy-sec"><h4>💰 价格最低 Top10</h4>' +
       r.cheapest.map((v, i) => itemHTML(v, i)).join('') + '</div>';
     h += '<div class="xy-sec"><h4>✨ 性价比 Top5</h4>' +
       r.best.map((v, i) => itemHTML(v, i)).join('') + '</div>';
     box.innerHTML = h;
+    const vb = panelEl.querySelector('#xy-verify-btn');
+    if (vb && !verifyDone) vb.addEventListener('click', startVerify);
   }
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -356,9 +388,111 @@
   }
 
   let running = false;
+  let verifying = false;
+
+  /* ================= 5. 详情页核验 ================= */
+  // 从详情页文本提取信任信号（用文本模式匹配，不依赖具体 DOM 结构）
+  function extractSignals(text, v) {
+    const info = { risks: [], trust: [] };
+    let m;
+    m = text.match(/(\d+)\s*人想要/);
+    info.want = m ? parseInt(m[1], 10) : null;
+    m = text.match(/(\d+)\s*(天|小时|分钟)前发布/) || text.match(/发布于?\s*(\d+)\s*(天|小时|分钟)前/);
+    info.publishAgo = m ? m[1] + m[2] : null;
+    m = text.match(/芝麻信用[：:\s]*([极好优秀良好中等较差]{2})/);
+    info.credit = m ? m[1] : null;
+    info.realNamed = /已实名|实名认证/.test(text);
+    m = text.match(/¥\s*([\d,]+(?:\.\d+)?)/);
+    info.detailPrice = m ? parseFloat(m[1].replace(/,/g, '')) : null;
+    if (info.detailPrice != null && Math.abs(info.detailPrice - v.price) > 0.01) {
+      info.risks.push({ level: 'high',
+        text: '点进详情价格变了（列表¥' + fmtPrice(v.price) + '，详情¥' + fmtPrice(info.detailPrice) + '），疑似引流价' });
+    }
+    if (/(微信号|QQ号|加微信|加QQ|微信交易|线下付款|脱离平台)/i.test(text)) {
+      info.risks.push({ level: 'high', text: '详情含站外交易关键词，谨防诈骗，务必走平台付款' });
+    }
+    return info;
+  }
+
+  // 结合中位价做风险评级
+  function riskLevel(v, info, median) {
+    if (info.error) return info;
+    if (median > 0 && v.price < median * 0.5 && (info.want == null || info.want < 10)) {
+      info.risks.push({ level: 'med',
+        text: '价格仅为中位价的' + Math.round(v.price / median * 100) + '%，且' +
+              (info.want == null ? '暂无想要人数' : '仅' + info.want + '人想要') + '，下手前请仔细甄别' });
+    }
+    if (info.want != null && info.want >= 50) info.trust.push(info.want + '人想要');
+    if (info.credit && /极好|优秀/.test(info.credit)) info.trust.push('芝麻信用' + info.credit);
+    if (info.realNamed) info.trust.push('卖家已实名');
+    return info;
+  }
+
+  // 在隐藏的同源 iframe 里打开详情页，读取渲染后的文本
+  function verifyOne(v) {
+    return new Promise((resolve) => {
+      const idm = (v.url || '').match(/id=(\d+)/);
+      if (!idm) { resolve({ error: true, risks: [], trust: [] }); return; }
+      const iframe = document.createElement('iframe');
+      // 沙箱：允许脚本与同源访问，但禁止跳出顶层页面
+      iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+      iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:10px;height:10px;visibility:hidden;';
+      let done = false;
+      const finish = (info) => {
+        if (done) return; done = true;
+        try { iframe.remove(); } catch (e) {}
+        resolve(info);
+      };
+      const timer = setTimeout(() => finish({ error: true, risks: [], trust: [] }), 25000);
+      iframe.onload = () => {
+        setTimeout(() => {
+          clearTimeout(timer);
+          try {
+            const doc = iframe.contentDocument;
+            const text = doc && doc.body ? (doc.body.innerText || '') : '';
+            if (!text) { finish({ error: true, risks: [], trust: [] }); return; }
+            finish(extractSignals(text, v));
+          } catch (e) { finish({ error: true, risks: [], trust: [] }); }
+        }, 3000); // 等 SPA 渲染
+      };
+      iframe.onerror = () => { clearTimeout(timer); finish({ error: true, risks: [], trust: [] }); };
+      iframe.src = 'https://www.goofish.com/item?id=' + idm[1];
+      document.body.appendChild(iframe);
+    });
+  }
+
+  async function startVerify() {
+    if (verifying || !lastResult || !lastResult.valid) return;
+    verifying = true;
+    verifyDone = false;
+    const btn = panelEl.querySelector('#xy-verify-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '核验中，请稍候…'; }
+    // 候选：去重合并 Top10 + Top5，上限 12 个
+    const seenU = new Set(), cands = [];
+    lastResult.cheapest.concat(lastResult.best).forEach((v) => {
+      if (v.url && !seenU.has(v.url) && cands.length < 12) { seenU.add(v.url); cands.push(v); }
+    });
+    setLog('🛡️ 正在逐个核验 ' + cands.length + ' 个候选商品的详情页，请稍候…');
+    let i = 0;
+    for (const v of cands) {
+      i++;
+      setLog('🛡️ 核验中 ' + i + '/' + cands.length + '：' + esc(v.title.slice(0, 18)) + '…');
+      try {
+        v._verify = riskLevel(v, await verifyOne(v), lastResult.median);
+      } catch (e) {
+        v._verify = { error: true, risks: [], trust: [] };
+      }
+      await sleep(1500); // 降低访问频率
+    }
+    verifyDone = true;
+    setLog('核验完成 ✅（' + cands.length + ' 个候选，风险标记已更新到列表中）');
+    renderResult(lastResult, lastKeyword);
+    verifying = false;
+  }
   async function runAnalysis() {
     if (running) return;
     running = true;
+    verifyDone = false;
     try {
       showPanel();
       const bodyText = document.body.innerText || '';
