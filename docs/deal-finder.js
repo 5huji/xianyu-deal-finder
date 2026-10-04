@@ -1,5 +1,5 @@
 /*
- * 闲鱼好价分析助手 v1.4.0
+ * 闲鱼好价分析助手 v1.5.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -116,10 +116,39 @@
   /* ================= 3. 分析逻辑 ================= */
   const BLOCKLIST = ['求购', '高价收', '回收', '出租', '租赁', '拼单', '换物', '互换',
     '免费送', '领养', '赠送', '单只', '补配', '单耳'];
-  const OTHER_BRANDS = ['soundcore', '华为', 'huawei', '小米', 'xiaomi', '三星', 'samsung',
-    'bose', '索尼', 'sony', 'vivo', 'oppo', '一加', 'oneplus', '联想', 'lenovo',
-    '森海', 'sennheiser', '罗技', 'logi', '漫步者', 'edifier', 'jbl', 'beats',
-    '荣耀', 'honor', '红米', 'redmi', '魅族', 'meizu', 'sanag', '塞那', 'ikf'];
+  // 品牌别名组：同一品牌的中英文写为一组
+  const BRAND_GROUPS = [
+    ['soundcore'], ['华为', 'huawei'], ['小米', 'xiaomi'], ['三星', 'samsung'],
+    ['bose'], ['索尼', 'sony'], ['vivo'], ['oppo'], ['一加', 'oneplus'],
+    ['联想', 'lenovo'], ['森海', 'sennheiser'], ['罗技', 'logi'], ['漫步者', 'edifier'],
+    ['jbl'], ['beats'], ['荣耀', 'honor'], ['红米', 'redmi'], ['魅族', 'meizu'],
+    ['sanag', '塞那'], ['ikf'],
+  ];
+  // 关键词里提到的品牌组
+  function mentionedBrandGroups(keyword) {
+    const kl = keyword.toLowerCase();
+    return BRAND_GROUPS.filter((g) => g.some((a) => kl.indexOf(a.toLowerCase()) > -1));
+  }
+  // 关键词里提到的品牌组豁免；关键词没提任何品牌时，不做品牌过滤（避免通用词被误杀）
+  function activeBrandBlocklist(keyword) {
+    const mentioned = mentionedBrandGroups(keyword);
+    if (!mentioned.length) return [];
+    const exempt = new Set();
+    mentioned.forEach((g) => g.forEach((a) => exempt.add(a.toLowerCase())));
+    const out = [];
+    BRAND_GROUPS.forEach((g) => {
+      if (!g.some((a) => exempt.has(a.toLowerCase()))) out.push.apply(out, g);
+    });
+    return out;
+  }
+  // 找 token 所属的品牌组下标（用于中英文归一），无则返回 -1
+  function brandGroupOf(token) {
+    const t = token.toLowerCase();
+    for (let i = 0; i < BRAND_GROUPS.length; i++) {
+      if (BRAND_GROUPS[i].some((a) => a.toLowerCase() === t)) return i;
+    }
+    return -1;
+  }
   const CONDITION_RULES = [
     [['全新未拆', '未拆封', '全新未激活', '全新国行'], 1.3, '全新未拆封'],
     [['几乎全新', '箱说齐全', '箱说全', '充新', '99新', '仅拆封'], 1.2, '接近全新'],
@@ -144,6 +173,7 @@
     const stats = { irrelevant: 0, blocked: 0, bait: 0 };
     const valid = [];
     const seenUrl = new Set();
+    const brandBlock = activeBrandBlocklist(keyword);
 
     // 归一化：价格转数字、标题兼容 title/name 字段
     const norm = [];
@@ -166,15 +196,39 @@
         stats.blocked++; continue;
       }
       const tl = title.toLowerCase();
-      if (OTHER_BRANDS.some((b) => tl.indexOf(b) > -1) && tl.indexOf('airpod') === -1 && title.indexOf('苹果') === -1) {
+      if (brandBlock.length && brandBlock.some((b) => tl.indexOf(b.toLowerCase()) > -1)) {
         stats.irrelevant++; continue;
       }
-      let rel = 0;
-      if (models.length && models.some((m) => tl.indexOf(m) > -1)) rel = 1;
-      else if (cjk) {
-        let hit = 0;
-        for (const ch of cjk) if (title.indexOf(ch) > -1) hit++;
-        rel = hit / cjk.length;
+      // 相关性：有拉丁 token 时用 token 命中率加权（品牌 token 做中英文归一，同组只计一次）；
+      // 纯中文关键词时，命中关键词提到的品牌即视为相关；否则回退到中文字符命中率
+      let rel = 0, hitN = 0, totalN = 0;
+      if (models.length) {
+        const counted = new Set();
+        models.forEach((m) => {
+          const gi = brandGroupOf(m);
+          if (gi >= 0) {
+            if (counted.has(gi)) return;
+            counted.add(gi); totalN++;
+            if (BRAND_GROUPS[gi].some((a) => tl.indexOf(a.toLowerCase()) > -1)) hitN++;
+          } else {
+            totalN++;
+            if (tl.indexOf(m) > -1) hitN++;
+          }
+        });
+        rel = totalN ? hitN / totalN : 0;
+        if (rel === 0 && cjk) {
+          let hit = 0;
+          for (const ch of cjk) if (title.indexOf(ch) > -1) hit++;
+          rel = hit / cjk.length;
+        }
+      } else if (cjk) {
+        const mg = mentionedBrandGroups(keyword);
+        if (mg.length && mg.some((g) => g.some((a) => tl.indexOf(a.toLowerCase()) > -1))) rel = 0.6;
+        else {
+          let hit = 0;
+          for (const ch of cjk) if (title.indexOf(ch) > -1) hit++;
+          rel = hit / cjk.length;
+        }
       }
       if (rel < 0.6) { stats.irrelevant++; continue; }
       valid.push(p);
