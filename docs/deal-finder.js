@@ -1,5 +1,5 @@
 /*
- * 闲鱼好价分析助手 v1.0.0
+ * 闲鱼好价分析助手 v1.1.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -207,6 +207,7 @@
     'border:none;border-radius:24px;padding:12px 18px;font-size:14px;cursor:pointer;',
     'box-shadow:0 4px 14px rgba(0,0,0,.25);font-family:inherit;}',
     '#xy-deal-btn:hover{background:#e55e00;}',
+    '@media (max-width:640px){#xy-deal-btn{padding:16px 22px;font-size:16px;bottom:110px;right:14px;}}',
     '#xy-deal-panel{position:fixed;top:0;right:0;width:460px;max-width:94vw;height:100vh;z-index:1000000;',
     'background:#fff;box-shadow:-4px 0 18px rgba(0,0,0,.18);display:flex;flex-direction:column;',
     'font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#222;}',
