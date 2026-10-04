@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         闲鱼好价分析助手
 // @namespace    https://github.com/5huji/xianyu-deal-finder
-// @version      1.5.0
+// @version      1.6.0
 // @description  在闲鱼搜索页一键分析：过滤求购、单只补配、钓鱼价等无效商品，输出最低价 Top10 与性价比推荐
 // @author       5huji
 // @match        https://www.goofish.com/search*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 
 /*
- * 闲鱼好价分析助手 v1.5.0
+ * 闲鱼好价分析助手 v1.6.0
  * 在闲鱼网页版搜索页运行：自动滚动加载多页搜索结果，过滤无效商品，
  * 输出「价格最低 Top10」与「性价比 Top5」，附推荐理由与直达链接。
  * 纯本地运行，不上传任何数据。
@@ -164,6 +164,33 @@
     }
     return -1;
   }
+  // token 权重：型号类（字母开头带数字，如 fold6/mate60）最高；纯规格（数字开头，如 16g/512gb）最低
+  function tokenWeight(m) {
+    if (/^[a-z]+\d/i.test(m)) return 2;
+    if (/^\d+[a-z]+$/i.test(m)) return 0.5;
+    return 1;
+  }
+  // 关键词中的型号 token（如 fold6）。注意：关键词侧保留词边界（不去空格），
+  // 否则 "fold6 16g" 去空格后会粘成 "fold616" 造成误判
+  function modelTokens(keyword) {
+    return (keyword.toLowerCase().match(/[a-z]+\d+/g) || []);
+  }
+  // 型号冲突：标题出现同前缀不同数字的型号（如关键词 fold6，标题 fold3/fold5）→ 直接判无关
+  // 标题侧保留空格，用 [\s\-_]* 兼容 "Fold 6"/"Fold-6" 等写法
+  function hasConflictingModel(keyword, title) {
+    const kws = modelTokens(keyword);
+    for (const m of kws) {
+      const prefix = m.replace(/\d+$/, '');
+      const num = m.slice(prefix.length);
+      if (!prefix || !num) continue;
+      const re = new RegExp(prefix + '[\\s\\-_]*([0-9]+)', 'gi');
+      let mm;
+      while ((mm = re.exec(title))) {
+        if (mm[1] !== num) return true;
+      }
+    }
+    return false;
+  }
   const CONDITION_RULES = [
     [['全新未拆', '未拆封', '全新未激活', '全新国行'], 1.3, '全新未拆封'],
     [['几乎全新', '箱说齐全', '箱说全', '充新', '99新', '仅拆封'], 1.2, '接近全新'],
@@ -214,23 +241,28 @@
       if (brandBlock.length && brandBlock.some((b) => tl.indexOf(b.toLowerCase()) > -1)) {
         stats.irrelevant++; continue;
       }
-      // 相关性：有拉丁 token 时用 token 命中率加权（品牌 token 做中英文归一，同组只计一次）；
-      // 纯中文关键词时，命中关键词提到的品牌即视为相关；否则回退到中文字符命中率
-      let rel = 0, hitN = 0, totalN = 0;
+      // 型号冲突（如搜 fold6，标题出现 fold3/fold5）直接判无关
+      if (hasConflictingModel(keyword, title)) { stats.irrelevant++; continue; }
+      // 相关性：token 命中率加权（品牌 token 做中英文归一，同组只计一次；型号 token 权重高于规格 token）；
+      // 有拉丁 token 时用加权命中率，纯中文关键词时命中品牌即相关，否则回退中文字符命中率
+      let rel = 0, hitW = 0, totalW = 0;
       if (models.length) {
         const counted = new Set();
+        const tls = tl.replace(/[\s\-_]+/g, ''); // 去空格/连字符后匹配，兼容 "airpods 4"
         models.forEach((m) => {
           const gi = brandGroupOf(m);
           if (gi >= 0) {
             if (counted.has(gi)) return;
-            counted.add(gi); totalN++;
-            if (BRAND_GROUPS[gi].some((a) => tl.indexOf(a.toLowerCase()) > -1)) hitN++;
+            counted.add(gi); totalW += 1;
+            if (BRAND_GROUPS[gi].some((a) => tl.indexOf(a.toLowerCase()) > -1)) hitW += 1;
           } else {
-            totalN++;
-            if (tl.indexOf(m) > -1) hitN++;
+            const mn = m.replace(/[\s\-_]+/g, ''); // token 与标题做同样的归一化
+            const w = tokenWeight(mn);
+            totalW += w;
+            if (mn && tls.indexOf(mn) > -1) hitW += w;
           }
         });
-        rel = totalN ? hitN / totalN : 0;
+        rel = totalW ? hitW / totalW : 0;
         if (rel === 0 && cjk) {
           let hit = 0;
           for (const ch of cjk) if (title.indexOf(ch) > -1) hit++;
@@ -568,17 +600,25 @@
   }
 
   // 找分页器的"下一页"按钮（桌面版式）。找不到返回 null。
+  // 策略：先找分页容器（文本里连续出现 1、2、3 页码的小容器），再在里面找 > / 下一页，
+  // 兼容 a/button/span/div/li 等各种实现，避免误点图片轮播的箭头。
   function findNextPage() {
-    const els = document.querySelectorAll('a,button');
-    for (const el of els) {
+    const all = document.querySelectorAll('div,nav,ul');
+    let pager = null;
+    for (const el of all) {
+      if (!el.offsetParent) continue;
+      const t = (el.textContent || '').replace(/\s+/g, '');
+      if (t.length < 120 && /1[^0-9]{0,3}2[^0-9]{0,3}3/.test(t)) { pager = el; break; }
+    }
+    if (!pager) return null;
+    const btns = pager.querySelectorAll('a,button,span,div,li');
+    for (const el of btns) {
       if (!el.offsetParent) continue; // 不可见
       const t = (el.textContent || '').trim();
       if (t !== '下一页' && t !== '>') continue;
       if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
       const cls = (el.className || '').toString();
       if (/disabl/i.test(cls)) continue;
-      const ptxt = el.parentElement ? (el.parentElement.textContent || '') : '';
-      if (!/\d\D+\d/.test(ptxt)) continue; // 父容器里至少有两个被隔开的数字才是分页器
       return el;
     }
     return null;
