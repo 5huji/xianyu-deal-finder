@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>闲鱼好价分析 · 手机图文攻略</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 0 48px; background: #f6f7f9; color: #222;
+         font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+  header { background: #ff6a00; color: #fff; padding: 22px 18px 18px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 8px 0 0; font-size: 13px; opacity: .92; line-height: 1.6; }
+  .wrap { padding: 14px 14px 0; max-width: 640px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 12px;
+          box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card h2 .n { display: inline-block; width: 24px; height: 24px; line-height: 24px; text-align: center;
+                background: #ff6a00; color: #fff; border-radius: 50%; font-size: 14px; margin-right: 8px; }
+  .card p, .card li { font-size: 14px; line-height: 1.75; color: #444; }
+  .card ol, .card ul { margin: 8px 0; padding-left: 20px; }
+  .card b { color: #222; }
+  code.kw { background: #f1f1f1; padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+  .warn { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px;
+          padding: 10px 12px; font-size: 13px; color: #9a3412; margin: 10px 0; line-height: 1.7; }
+  .btn { display: block; width: 100%; border-radius: 12px; padding: 14px; font-size: 16px;
+         text-align: center; text-decoration: none; background: #ff6a00; color: #fff; margin-top: 10px; }
+  .btn.ghost { background: #fff; color: #ff6a00; border: 1.5px solid #ff6a00; }
+
+  /* ===== 手机示意图 ===== */
+  .phone { width: 270px; margin: 14px auto; border: 3px solid #1f2937; border-radius: 26px;
+           overflow: hidden; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  .chrome-bar { display: flex; align-items: center; gap: 6px; background: #eef0f3;
+                padding: 8px 10px; font-size: 11px; color: #555; }
+  .chrome-bar .url { flex: 1; background: #fff; border-radius: 14px; padding: 5px 10px;
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chrome-bar .star { color: #888; font-size: 13px; }
+  .screen { min-height: 300px; position: relative; background: #fff; }
+  .mock-head { background: #ff6a00; color: #fff; padding: 12px; font-size: 14px; font-weight: bold; }
+  .mock-btn { margin: 16px 14px; background: #ff6a00; color: #fff; text-align: center;
+              border-radius: 10px; padding: 12px; font-size: 14px; position: relative; }
+  .pulse { animation: pulse 1.6s infinite; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255,106,0,.5); }
+    70% { box-shadow: 0 0 0 10px rgba(255,106,0,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,106,0,0); }
+  }
+  .toast { margin: 0 14px; font-size: 12px; color: #16a34a; }
+  .dialog { margin: 18px 14px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; }
+  .dialog .t { font-size: 14px; font-weight: bold; margin-bottom: 10px; }
+  .dialog label { font-size: 11px; color: #888; }
+  .dialog .field { border-bottom: 2px solid #d1d5db; padding: 6px 2px; font-size: 12px; margin-bottom: 10px;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dialog .field.hot { border-bottom-color: #ff6a00; background: #fff7ed; border-radius: 6px 6px 0 0; }
+  .tag { display: inline-block; background: #ff6a00; color: #fff; font-size: 10px; border-radius: 8px;
+         padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
+  .searchbox { margin: 12px; background: #f1f2f4; border-radius: 16px; padding: 8px 12px; font-size: 13px; color: #333; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 14px; }
+  .goods { background: #f8f8f8; border-radius: 8px; padding: 6px; font-size: 11px; }
+  .goods .pic { background: #e5e7eb; border-radius: 6px; height: 56px; margin-bottom: 4px;
+                display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  .goods .pr { color: #e4393c; font-weight: bold; }
+  .drop { background: #fff; border-top: 1px solid #eee; }
+  .drop .row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 13px;
+               border-bottom: 1px solid #f3f4f6; }
+  .drop .row.hot { background: #fff7ed; }
+  .drop .sub { font-size: 11px; color: #888; }
+  .panel { position: absolute; top: 0; right: 0; bottom: 0; width: 78%; background: #fff;
+           box-shadow: -4px 0 14px rgba(0,0,0,.15); padding: 10px; font-size: 11px; }
+  .panel h5 { margin: 4px 0 8px; font-size: 12px; }
+  .panel .it { display: flex; gap: 6px; padding: 6px 0; border-bottom: 1px solid #f3f4f6; align-items: center; }
+  .panel .rk { background: #ff6a00; color: #fff; border-radius: 8px; font-size: 10px;
+               min-width: 16px; height: 16px; line-height: 16px; text-align: center; }
+  .panel .pr2 { color: #e4393c; font-weight: bold; }
+  .finger { text-align: center; font-size: 22px; margin-top: 6px; animation: tap 1.6s infinite; }
+  @keyframes tap { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+  .cap { text-align: center; font-size: 12px; color: #888; margin-top: 8px; }
+
+  footer { text-align: center; font-size: 12px; color: #aaa; padding: 18px 14px 0; line-height: 1.8; }
+  footer a { color: #888; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📖 闲鱼好价分析 · 手机图文攻略</h1>
+  <p>以 vivo + Chrome 为例，一次设置好，以后每次用只需 3 步。先花 2 分钟看完再动手。</p>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2><span class="n">!</span>开始前先自查（30秒）</h2>
+    <ul>
+      <li>之前复制过旧版代码？<b>旧代码已失效</b>，必须按下边第一步<b>重新复制新的</b>，替换掉书签里的网址。</li>
+      <li>运行分析时，当前页面必须是<b>闲鱼搜索结果页</b>（网址里有 <code class="kw">goofish.com/search</code>）。</li>
+      <li>Chrome 里打开过 <code class="kw">goofish.com</code> 并登录（只需一次）。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">1</span>复制书签代码</h2>
+    <p>打开安装页，点 <b>📋 复制书签代码</b>，看到 <b>✅ 已复制</b> 就行。新代码只有一百多个字符。</p>
+    <a class="btn" href="https://5huji.github.io/xianyu-deal-finder/">📋 去安装页复制代码</a>
+    <div class="phone">
+      <div class="chrome-bar"><span class="star">☆</span><span class="url">5huji.github.io/xianyu-deal-finder/</span></div>
+      <div class="screen">
+        <div class="mock-head">🐟 闲鱼好价分析助手 <span style="font-weight:normal;font-size:11px">手机版</span></div>
+        <div class="mock-btn pulse">📋 复制书签代码</div>
+        <div class="toast">✅ 已复制，去第二步存为书签吧</div>
+        <div class="finger">👆</div>
+      </div>
+    </div>
+    <div class="cap">点一下按钮，看到绿色提示即复制成功</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">2</span>存成书签并粘贴代码</h2>
+    <ol>
+      <li>还在安装页，点地址栏的 <b>☆</b>，把本页存成书签。</li>
+      <li>点 Chrome 右上角 <b>⋮</b> → <b>书签</b>，找到刚存的书签，点旁边的 <b>✏️ 修改</b>。</li>
+      <li><b>名称</b>改成 <code class="kw">闲鱼好价</code>（四个字，以后地址栏一输就能找到）。</li>
+      <li><b>网址</b>整段删掉，粘贴刚才复制的代码<span class="tag">只有一行</span>。</li>
+      <li>返回即保存。</li>
+    </ol>
+    <div class="warn">⚠️ 网址栏必须<b>全部删干净</b>再粘贴，前面不能留 <code class="kw">https://</code> 之类的残留。代码以 <code class="kw">javascript:</code> 开头就是对的。</div>
+    <div class="phone">
+      <div class="screen">
+        <div class="dialog">
+          <div class="t">修改书签</div>
+          <label>名称</label>
+          <div class="field">闲鱼好价</div>
+          <label>网址</label>
+          <div class="field hot">javascript:(function(){var d=document,s=…</div>
+          <div class="finger">👆</div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">网址栏粘贴的是短代码，只有一行</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">3</span>去闲鱼搜索商品</h2>
+    <p>在 Chrome 里打开 <b>goofish.com</b>（不是闲鱼 App），登录后搜索商品，关键词越具体越好，比如 <code class="kw">airpods4 降噪版</code>。</p>
+    <div class="phone">
+      <div class="chrome-bar"><span class="url">goofish.com/search?q=airpods</span></div>
+      <div class="screen">
+        <div class="searchbox">🔍 airpods</div>
+        <div class="grid">
+          <div class="goods"><div class="pic">🎧</div>AirPods 4 降噪版 全新<div class="pr">¥589</div></div>
+          <div class="goods"><div class="pic">🎧</div>airpods4 国行在保<div class="pr">¥560</div></div>
+          <div class="goods"><div class="pic">🎧</div>AirPods Pro 2<div class="pr">¥720</div></div>
+          <div class="goods"><div class="pic">🎧</div>airpods4 几乎全新<div class="pr">¥545</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">确认是搜索结果页，且已登录</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">4</span>运行分析</h2>
+    <ol>
+      <li>点浏览器<b>地址栏</b>，输入 <code class="kw">闲鱼好价</code>。</li>
+      <li>点弹出的 <b>★ 闲鱼好价</b> 书签。</li>
+      <li>页面会自动滚动加载（约 20 秒，<b>别动它</b>）。</li>
+      <li>右侧滑出报告：<b>💰 价格最低 Top10</b> + <b>✨ 性价比 Top5</b>，点标题直达商品页。</li>
+    </ol>
+    <div class="phone">
+      <div class="chrome-bar"><span class="url">闲鱼好价</span><span class="star">✕</span></div>
+      <div class="drop">
+        <div class="row hot"><span>★</span><span>闲鱼好价<br><span class="sub">移动设备书签</span></span></div>
+        <div class="row"><span>🔍</span><span>闲鱼好价分析</span></div>
+      </div>
+      <div class="finger">👆 点这个书签</div>
+    </div>
+    <div class="cap">在地址栏输入名称，点书签运行</div>
+    <div class="phone" style="margin-top:16px">
+      <div class="screen">
+        <div style="padding:12px;font-size:12px;color:#888">← 搜索结果（采集中…）</div>
+        <div class="panel">
+          <h5>🐟 闲鱼好价分析</h5>
+          <div style="font-size:11px;color:#555;background:#fff7ed;border-radius:6px;padding:6px;margin-bottom:6px">
+            有效 <b>23</b> 条 · 中位价 <b>¥570</b>
+          </div>
+          <h5>💰 价格最低 Top10</h5>
+          <div class="it"><span class="rk">1</span><span>AirPods 4 降噪版…<br><span class="pr2">¥520</span></span></div>
+          <div class="it"><span class="rk">2</span><span>airpods4 国行在保…<br><span class="pr2">¥545</span></span></div>
+          <div class="it"><span class="rk">3</span><span>AirPods 4 几乎全新…<br><span class="pr2">¥560</span></span></div>
+          <h5>✨ 性价比 Top5</h5>
+          <div class="it"><span class="rk">1</span><span>airpods4 国行在保…<br><span class="pr2">¥545</span></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cap">约 20 秒后滑出分析报告</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="n">?</span>常见问题</h2>
+    <ul>
+      <li><b>点了书签没反应</b> → 99% 是旧代码。回到第一步<b>重新复制</b>，替换书签网址。</li>
+      <li><b>提示"请先完成闲鱼登录"</b> → 在 Chrome 里打开 goofish.com 登录一次即可。</li>
+      <li><b>"没抓到有效数据"</b> → 关键词太冷门，换更常见的词再搜。</li>
+      <li><b>想分析别的商品</b> → 直接在闲鱼搜新关键词，地址栏再运行一次书签就行。</li>
+      <li><b>下单前</b> → 点标题进详情页核对价格和成色，报告只是帮你缩小范围。</li>
+    </ul>
+  </div>
+
+  <a class="btn ghost" href="https://5huji.github.io/xianyu-deal-finder/">← 返回安装页</a>
+</div>
+
+<footer>
+  纯本地分析，不上传任何数据<br>
+  <a href="https://github.com/5huji/xianyu-deal-finder">GitHub 仓库</a> · MIT License
+</footer>
+</body>
+</html>
