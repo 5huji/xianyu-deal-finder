@@ -17,6 +17,13 @@
    - 脚本开启了自动更新，后续优化会自动同步
 3. 完成
 
+## 手机上用
+
+📖 图文攻略：https://5huji.github.io/xianyu-deal-finder/guide.html
+
+- **推荐（最省事）**：安装 **Kiwi Browser** → 在里面装 Tampermonkey 扩展 → 打开上面的安装页点"一键安装脚本"。之后在 Kiwi 里用闲鱼，搜完直接点右下角 **🔍 好价分析**，零额外操作。
+- **备选**：Chrome 书签版，见攻略页方案 B。
+
 ## 使用
 
 1. 打开 https://www.goofish.com/ 并登录你的闲鱼账号
